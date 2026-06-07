@@ -1,0 +1,286 @@
+/***********************************************************************
+Q1. List Top 5 Customers by Total Order Amount
+Retrieve the top 5 customers who have spent the most across all sales orders.
+Display: CustomerID, CustomerName, TotalSpent
+************************************************************************/
+
+SELECT TOP 5
+    c.CustomerID,
+    c.Name AS CustomerName,
+    SUM(so.TotalAmount) AS TotalSpent
+FROM customer c
+JOIN salesorder so
+    ON c.CustomerID = so.CustomerID
+GROUP BY
+    c.CustomerID,
+    c.Name
+ORDER BY TotalSpent DESC;
+
+
+
+/***********************************************************************
+Q2. Find the Number of Products Supplied by Each Supplier
+Display: SupplierID, SupplierName, ProductCount
+Only include suppliers that have more than 10 products.
+************************************************************************/
+
+SELECT
+    s.SupplierID,
+    s.Name AS SupplierName,
+    COUNT(DISTINCT pod.ProductID) AS ProductCount
+FROM supplier s
+JOIN purchaseorder po
+    ON s.SupplierID = po.SupplierID
+JOIN purchaseorderdetail pod
+    ON po.OrderID = pod.OrderID
+GROUP BY
+    s.SupplierID,
+    s.Name
+HAVING COUNT(DISTINCT pod.ProductID) > 10;
+
+
+
+/***********************************************************************
+Q3. Identify Products That Have Been Ordered but Never Returned
+Display: ProductID, ProductName, TotalOrderQuantity
+************************************************************************/
+
+SELECT
+    p.ProductID,
+    p.Name AS ProductName,
+    SUM(sod.Quantity) AS TotalOrderQuantity
+FROM product p
+JOIN salesorderdetail sod
+    ON p.ProductID = sod.ProductID
+LEFT JOIN returndetail rd
+    ON p.ProductID = rd.ProductID
+WHERE rd.ProductID IS NULL
+GROUP BY
+    p.ProductID,
+    p.Name;
+
+
+
+/***********************************************************************
+Q4. For Each Category, Find the Most Expensive Product
+Display: CategoryID, CategoryName, ProductName, Price
+Use a subquery to get the maximum price per category.
+************************************************************************/
+
+SELECT
+    c.CategoryID,
+    c.Name AS CategoryName,
+    p.Name AS ProductName,
+    p.Price
+FROM product p
+JOIN category c
+    ON p.CategoryID = c.CategoryID
+WHERE p.Price =
+(
+    SELECT MAX(p2.Price)
+    FROM product p2
+    WHERE p2.CategoryID = p.CategoryID
+);
+
+
+
+/***********************************************************************
+Q5. List All Sales Orders with Customer, Product, Category and Supplier
+Display:
+OrderID, CustomerName, ProductName,
+CategoryName, SupplierName, Quantity
+************************************************************************/
+
+SELECT
+    so.OrderID,
+    c.Name AS CustomerName,
+    p.Name AS ProductName,
+    cat.Name AS CategoryName,
+    s.Name AS SupplierName,
+    sod.Quantity
+FROM salesorder so
+JOIN customer c
+    ON so.CustomerID = c.CustomerID
+JOIN salesorderdetail sod
+    ON so.OrderID = sod.OrderID
+JOIN product p
+    ON sod.ProductID = p.ProductID
+JOIN category cat
+    ON p.CategoryID = cat.CategoryID
+JOIN purchaseorderdetail pod
+    ON p.ProductID = pod.ProductID
+JOIN purchaseorder po
+    ON pod.OrderID = po.OrderID
+JOIN supplier s
+    ON po.SupplierID = s.SupplierID;
+
+
+
+/***********************************************************************
+Q6. Find All Shipments with Details of Warehouse, Manager and Products
+Display:
+ShipmentID, WarehouseName, ManagerName,
+ProductName, QuantityShipped, TrackingNumber
+************************************************************************/
+
+SELECT
+    sh.ShipmentID,
+    l.Name AS WarehouseName,
+    e.Name AS ManagerName,
+    p.Name AS ProductName,
+    sd.Quantity AS QuantityShipped,
+    sh.TrackingNumber
+FROM shipment sh
+JOIN warehouse w
+    ON sh.WarehouseID = w.WarehouseID
+JOIN employee e
+    ON w.ManagerID = e.EmployeeID
+JOIN location l
+    ON w.LocationID = l.LocationID
+JOIN shipmentdetail sd
+    ON sh.ShipmentID = sd.ShipmentID
+JOIN product p
+    ON sd.ProductID = p.ProductID;
+
+
+
+/***********************************************************************
+Q7. Find the Top 3 Highest-Value Orders Per Customer Using RANK()
+Display:
+CustomerID, CustomerName, OrderID, TotalAmount
+************************************************************************/
+
+WITH CustomerOrders AS
+(
+    SELECT
+        c.CustomerID,
+        c.Name AS CustomerName,
+        so.OrderID,
+        so.TotalAmount,
+        RANK() OVER
+        (
+            PARTITION BY c.CustomerID
+            ORDER BY so.TotalAmount DESC
+        ) AS OrderRank
+    FROM customer c
+    JOIN salesorder so
+        ON c.CustomerID = so.CustomerID
+)
+SELECT
+    CustomerID,
+    CustomerName,
+    OrderID,
+    TotalAmount
+FROM CustomerOrders
+WHERE OrderRank <= 3
+ORDER BY CustomerID, TotalAmount DESC;
+
+
+
+/***********************************************************************
+Q8. Show Product Sales History with Previous and Next Quantities
+Display:
+ProductID, ProductName, OrderID, OrderDate,
+Quantity, PrevQuantity, NextQuantity
+Use LAG() and LEAD().
+************************************************************************/
+
+SELECT
+    p.ProductID,
+    p.Name AS ProductName,
+    so.OrderID,
+    so.OrderDate,
+    sod.Quantity,
+    LAG(sod.Quantity) OVER
+    (
+        PARTITION BY p.ProductID
+        ORDER BY so.OrderDate
+    ) AS PrevQuantity,
+    LEAD(sod.Quantity) OVER
+    (
+        PARTITION BY p.ProductID
+        ORDER BY so.OrderDate
+    ) AS NextQuantity
+FROM product p
+JOIN salesorderdetail sod
+    ON p.ProductID = sod.ProductID
+JOIN salesorder so
+    ON sod.OrderID = so.OrderID
+ORDER BY
+    p.ProductID,
+    so.OrderDate;
+
+
+
+/***********************************************************************
+Q9. Create a View: vw_CustomerOrderSummary
+
+Display:
+CustomerID,
+CustomerName,
+TotalOrders,
+TotalAmountSpent,
+LastOrderDate
+************************************************************************/
+
+CREATE VIEW vw_CustomerOrderSummary
+AS
+SELECT
+    c.CustomerID,
+    c.Name AS CustomerName,
+    COUNT(so.OrderID) AS TotalOrders,
+    SUM(so.TotalAmount) AS TotalAmountSpent,
+    MAX(so.OrderDate) AS LastOrderDate
+FROM customer c
+LEFT JOIN salesorder so
+    ON c.CustomerID = so.CustomerID
+GROUP BY
+    c.CustomerID,
+    c.Name;
+GO
+
+-- Test the View
+
+SELECT *
+FROM vw_CustomerOrderSummary;
+
+
+
+/***********************************************************************
+Q10. Create Stored Procedure: sp_GetSupplierSales
+
+Input:
+    @SupplierID
+
+Output:
+    Total sales amount for all products supplied by
+    the given supplier.
+************************************************************************/
+
+CREATE PROCEDURE sp_GetSupplierSales
+    @SupplierID INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT
+        s.SupplierID,
+        s.Name AS SupplierName,
+        SUM(sod.TotalAmount) AS TotalSalesAmount
+    FROM supplier s
+    JOIN purchaseorder po
+        ON s.SupplierID = po.SupplierID
+    JOIN purchaseorderdetail pod
+        ON po.OrderID = pod.OrderID
+    JOIN salesorderdetail sod
+        ON pod.ProductID = sod.ProductID
+    WHERE s.SupplierID = @SupplierID
+    GROUP BY
+        s.SupplierID,
+        s.Name;
+END;
+GO
+
+-- Execute Procedure
+
+EXEC sp_GetSupplierSales @SupplierID = 1;
